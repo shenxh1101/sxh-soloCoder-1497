@@ -4,12 +4,12 @@ import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { cn } from '../lib/utils';
 import { formatDateCN } from '../utils/date';
-import type { BouquetTemplate } from '../types';
+import type { BouquetTemplate, BatchDeduction } from '../types';
 
 type OrderStep = 1 | 2 | 3;
 
 export default function Orders() {
-  const { orders, templates, flowers, checkStockForOrder, createOrder, cancelOrder } =
+  const { orders, templates, flowers, purchases, checkStockForOrder, createOrder, cancelOrder } =
     useFlowerStore();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [step, setStep] = useState<OrderStep>(1);
@@ -17,6 +17,7 @@ export default function Orders() {
   const [quantity, setQuantity] = useState('1');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
 
   const sortedOrders = useMemo(() => {
     return [...orders].sort(
@@ -90,7 +91,10 @@ export default function Orders() {
 
   const handleCancelOrder = (orderId: string) => {
     if (window.confirm('确定要撤销这个订单吗？撤销后库存将自动恢复。')) {
-      cancelOrder(orderId);
+      const result = cancelOrder(orderId);
+      if (result.success) {
+        alert('已按原批次恢复库存');
+      }
     }
   };
 
@@ -101,6 +105,34 @@ export default function Orders() {
     customerPhone.trim() !== '';
 
   const canSubmit = stockCheck?.sufficient ?? false;
+
+  const getPurchaseById = (purchaseId: string) => {
+    return purchases.find((p) => p.id === purchaseId);
+  };
+
+  const getFlowerSaleInfo = (flowerId: string) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return purchases.find(
+      (p) =>
+        p.flowerId === flowerId &&
+        p.isOnSale &&
+        p.salePrice !== null &&
+        p.remainingStems > 0 &&
+        (p.saleEndDate === null || new Date(p.saleEndDate) >= today)
+    );
+  };
+
+  const formatBatchDeduction = (deduction: BatchDeduction) => {
+    const purchase = getPurchaseById(deduction.purchaseId);
+    const purchaseDate = purchase ? formatDateCN(purchase.purchaseDate) : '';
+    const priceType = deduction.isOnSale ? '特价' : '正常';
+    return {
+      ...deduction,
+      purchaseDate,
+      priceType,
+    };
+  };
 
   return (
     <div className="space-y-6">
@@ -187,8 +219,24 @@ export default function Orders() {
                   </div>
                 </div>
 
-                {!isCancelled && (
-                  <div className="flex justify-end mt-4 pt-4 border-t border-rose-100">
+                <div className="flex justify-between items-center mt-4 pt-4 border-t border-rose-100">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setExpandedOrderId(expandedOrderId === order.id ? null : order.id)}
+                    className="text-stone-500 hover:text-stone-700 hover:bg-stone-50"
+                  >
+                    <span>{expandedOrderId === order.id ? '收起' : '查看'}批次扣减</span>
+                    <span
+                      className={cn(
+                        'transition-transform duration-200',
+                        expandedOrderId === order.id && 'rotate-180'
+                      )}
+                    >
+                      ▼
+                    </span>
+                  </Button>
+                  {!isCancelled && (
                     <Button
                       variant="ghost"
                       size="sm"
@@ -197,6 +245,46 @@ export default function Orders() {
                     >
                       撤销订单
                     </Button>
+                  )}
+                </div>
+
+                {expandedOrderId === order.id && (
+                  <div className="mt-4 pt-4 border-t border-dashed border-rose-100 animate-fade-in">
+                    <p className="text-sm font-medium text-stone-700 mb-3">批次扣减详情：</p>
+                    <div className="space-y-2">
+                      {order.items.flatMap((item) =>
+                        (item.batchDeductions ?? []).map((deduction, idx) => {
+                          const formatted = formatBatchDeduction(deduction);
+                          return (
+                            <div
+                              key={`${deduction.purchaseId}-${idx}`}
+                              className="flex items-start gap-2 text-sm"
+                            >
+                              <span className="text-stone-400 mt-0.5">•</span>
+                              <div className="flex-1">
+                                <span className="text-stone-700">
+                                  {deduction.flowerName}
+                                </span>
+                                <span className="text-stone-400 ml-2">
+                                  - 批次 {deduction.purchaseId} ({formatted.purchaseDate}进货)
+                                </span>
+                                <span className="text-stone-700 ml-2">
+                                  - {deduction.quantity}支
+                                </span>
+                                <span className="text-stone-500 ml-1">
+                                  ({formatted.priceType} ¥{deduction.unitPrice.toFixed(1)}/支)
+                                </span>
+                                {deduction.isOnSale && (
+                                  <span className="ml-2 px-2 py-0.5 bg-orange-100 text-orange-600 text-xs rounded-full font-medium">
+                                    🔥 特价
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -382,6 +470,7 @@ export default function Orders() {
                   {stockCheck.flowerUsage.map((usage, index) => {
                     const isSufficient = usage.available >= usage.required;
                     const flower = flowers.find((f) => f.id === usage.flowerId);
+                    const saleInfo = getFlowerSaleInfo(usage.flowerId);
                     return (
                       <div
                         key={index}
@@ -392,7 +481,14 @@ export default function Orders() {
                       >
                         <div className="flex items-center gap-2">
                           <span className="text-xl">{flower?.emoji || '🌸'}</span>
-                          <span className="text-sm text-stone-700">{usage.flowerName}</span>
+                          <div>
+                            <span className="text-sm text-stone-700">{usage.flowerName}</span>
+                            {saleInfo && saleInfo.salePrice !== null && (
+                              <span className="ml-2 px-2 py-0.5 bg-orange-100 text-orange-600 text-xs rounded-full font-medium">
+                                有特价¥{saleInfo.salePrice.toFixed(1)}/支
+                              </span>
+                            )}
+                          </div>
                         </div>
                         <div className="text-right">
                           <p

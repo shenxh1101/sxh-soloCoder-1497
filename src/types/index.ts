@@ -16,6 +16,10 @@ export interface Purchase {
   purchaseDate: string;
   remainingStems: number;
   totalCost: number;
+  isOnSale: boolean;
+  salePrice: number | null;
+  saleReason: string;
+  saleEndDate: string | null;
 }
 
 export interface BouquetItem {
@@ -32,12 +36,22 @@ export interface BouquetTemplate {
   items: BouquetItem[];
 }
 
+export interface BatchDeduction {
+  purchaseId: string;
+  flowerId: string;
+  flowerName: string;
+  quantity: number;
+  unitPrice: number;
+  isOnSale: boolean;
+}
+
 export interface OrderItem {
   templateId: string;
   templateName: string;
   quantity: number;
   subtotal: number;
   flowerUsage: { flowerId: string; flowerName: string; quantity: number }[];
+  batchDeductions: BatchDeduction[];
 }
 
 export interface Order {
@@ -48,12 +62,15 @@ export interface Order {
   totalAmount: number;
   items: OrderItem[];
   status: 'completed' | 'cancelled';
+  saleAmount: number;
+  normalAmount: number;
 }
 
 export interface Wastage {
   id: string;
   flowerId: string;
   flowerName: string;
+  purchaseId: string;
   quantity: number;
   reason: string;
   date: string;

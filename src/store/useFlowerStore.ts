@@ -8,6 +8,7 @@ import {
   OrderItem,
   Wastage,
   BouquetItem,
+  BatchDeduction,
 } from '../types';
 import {
   defaultFlowers,
@@ -36,14 +37,14 @@ interface FlowerStore {
     pricePerBunch: number;
     stemsPerBunch: number;
     purchaseDate: string;
-  }) => void;
+  }) => Purchase;
 
   addTemplate: (data: {
     name: string;
     price: number;
     description: string;
     items: BouquetItem[];
-  }) => void;
+  }) => BouquetTemplate;
 
   updateTemplate: (id: string, data: Partial<BouquetTemplate>) => void;
 
@@ -61,14 +62,20 @@ interface FlowerStore {
     quantity: number;
   }) => { success: boolean; message: string; order?: Order };
 
-  cancelOrder: (orderId: string) => void;
+  cancelOrder: (orderId: string) => { success: boolean; message: string };
 
   addWastage: (data: {
-    flowerId: string;
+    purchaseId: string;
     quantity: number;
     reason: string;
     date: string;
-  }) => void;
+  }) => { success: boolean; message: string; wastage?: Wastage };
+
+  setSale: (purchaseId: string, salePrice: number, saleReason: string, saleEndDate: string) => { success: boolean; message: string; purchase?: Purchase };
+
+  cancelSale: (purchaseId: string) => { success: boolean; message: string; purchase?: Purchase };
+
+  getSalePurchases: () => Purchase[];
 
   getLowStockFlowers: () => Flower[];
 
@@ -109,7 +116,9 @@ export const useFlowerStore = create<FlowerStore>()(
 
       addPurchase: (data) => {
         const flower = get().getFlowerById(data.flowerId);
-        if (!flower) return;
+        if (!flower) {
+          throw new Error('花材不存在');
+        }
 
         const totalCost = (data.quantity / data.stemsPerBunch) * data.pricePerBunch;
 
@@ -123,11 +132,17 @@ export const useFlowerStore = create<FlowerStore>()(
           purchaseDate: data.purchaseDate,
           remainingStems: data.quantity,
           totalCost: Math.round(totalCost * 100) / 100,
+          isOnSale: false,
+          salePrice: null,
+          saleReason: '',
+          saleEndDate: null,
         };
 
         set((state) => ({
           purchases: [...state.purchases, newPurchase],
         }));
+
+        return newPurchase;
       },
 
       addTemplate: (data) => {
@@ -142,6 +157,8 @@ export const useFlowerStore = create<FlowerStore>()(
         set((state) => ({
           templates: [...state.templates, newTemplate],
         }));
+
+        return newTemplate;
       },
 
       updateTemplate: (id, data) => {
@@ -164,7 +181,17 @@ export const useFlowerStore = create<FlowerStore>()(
           return { sufficient: false, flowerUsage: [] };
         }
 
-        const flowerUsage = template.items.map((item) => {
+        const mergedItems = template.items.reduce((acc, item) => {
+          const existing = acc.find((i) => i.flowerId === item.flowerId);
+          if (existing) {
+            existing.quantity += item.quantity;
+          } else {
+            acc.push({ ...item });
+          }
+          return acc;
+        }, [] as BouquetItem[]);
+
+        const flowerUsage = mergedItems.map((item) => {
           const required = item.quantity * quantity;
           const available = get().getStockByFlowerId(item.flowerId);
           const flower = get().getFlowerById(item.flowerId);
@@ -179,6 +206,82 @@ export const useFlowerStore = create<FlowerStore>()(
         const sufficient = flowerUsage.every((u) => u.available >= u.required);
 
         return { sufficient, flowerUsage };
+      },
+
+      setSale: (purchaseId, salePrice, saleReason, saleEndDate) => {
+        const purchase = get().purchases.find((p) => p.id === purchaseId);
+        if (!purchase) {
+          return { success: false, message: '批次不存在' };
+        }
+
+        if (purchase.remainingStems <= 0) {
+          return { success: false, message: '该批次已无库存' };
+        }
+
+        if (salePrice <= 0) {
+          return { success: false, message: '特价必须大于0' };
+        }
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const endDate = new Date(saleEndDate);
+        endDate.setHours(0, 0, 0, 0);
+
+        if (endDate < today) {
+          return { success: false, message: '特价结束日期不能早于今天' };
+        }
+
+        const updatedPurchase: Purchase = {
+          ...purchase,
+          isOnSale: true,
+          salePrice,
+          saleReason,
+          saleEndDate,
+        };
+
+        set((state) => ({
+          purchases: state.purchases.map((p) =>
+            p.id === purchaseId ? updatedPurchase : p
+          ),
+        }));
+
+        return { success: true, message: '设置特价成功', purchase: updatedPurchase };
+      },
+
+      cancelSale: (purchaseId) => {
+        const purchase = get().purchases.find((p) => p.id === purchaseId);
+        if (!purchase) {
+          return { success: false, message: '批次不存在' };
+        }
+
+        const updatedPurchase: Purchase = {
+          ...purchase,
+          isOnSale: false,
+          salePrice: null,
+          saleReason: '',
+          saleEndDate: null,
+        };
+
+        set((state) => ({
+          purchases: state.purchases.map((p) =>
+            p.id === purchaseId ? updatedPurchase : p
+          ),
+        }));
+
+        return { success: true, message: '取消特价成功', purchase: updatedPurchase };
+      },
+
+      getSalePurchases: () => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        return get().purchases.filter((p) => {
+          if (!p.isOnSale || p.remainingStems <= 0) return false;
+          if (!p.saleEndDate) return true;
+          const endDate = new Date(p.saleEndDate);
+          endDate.setHours(0, 0, 0, 0);
+          return endDate >= today;
+        });
       },
 
       createOrder: (data) => {
@@ -201,25 +304,81 @@ export const useFlowerStore = create<FlowerStore>()(
           };
         }
 
+        const mergedItems = template.items.reduce((acc, item) => {
+          const existing = acc.find((i) => i.flowerId === item.flowerId);
+          if (existing) {
+            existing.quantity += item.quantity;
+          } else {
+            acc.push({ ...item });
+          }
+          return acc;
+        }, [] as BouquetItem[]);
+
         const updatedPurchases = [...get().purchases];
         const flowerUsageDetailed: { flowerId: string; flowerName: string; quantity: number }[] = [];
+        const allBatchDeductions: BatchDeduction[] = [];
+        let saleAmount = 0;
+        let normalAmount = 0;
 
-        for (const item of template.items) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        for (const item of mergedItems) {
           let remainingToDeduct = item.quantity * data.quantity;
+          const flower = get().getFlowerById(item.flowerId);
+
           const flowerPurchases = updatedPurchases
-            .filter((p) => p.flowerId === item.flowerId && p.remainingStems > 0)
+            .filter((p) => p.flowerId === item.flowerId && p.remainingStems > 0);
+
+          const salePurchases = flowerPurchases
+            .filter((p) => p.isOnSale && p.salePrice !== null && (p.saleEndDate === null || new Date(p.saleEndDate) >= today))
+            .sort((a, b) => {
+              if (a.saleEndDate && b.saleEndDate) {
+                return new Date(a.saleEndDate).getTime() - new Date(b.saleEndDate).getTime();
+              }
+              if (a.saleEndDate) return -1;
+              if (b.saleEndDate) return 1;
+              return new Date(a.purchaseDate).getTime() - new Date(b.purchaseDate).getTime();
+            });
+
+          const normalPurchases = flowerPurchases
+            .filter((p) => !p.isOnSale || p.salePrice === null || (p.saleEndDate !== null && new Date(p.saleEndDate) < today))
             .sort((a, b) => new Date(a.purchaseDate).getTime() - new Date(b.purchaseDate).getTime());
 
-          for (const purchase of flowerPurchases) {
+          const sortedPurchases = [...salePurchases, ...normalPurchases];
+
+          for (const purchase of sortedPurchases) {
             if (remainingToDeduct <= 0) break;
+
             const deduct = Math.min(purchase.remainingStems, remainingToDeduct);
+            const isOnSale = purchase.isOnSale && purchase.salePrice !== null &&
+              (purchase.saleEndDate === null || new Date(purchase.saleEndDate) >= today);
+            const unitPrice = isOnSale && purchase.salePrice !== null
+              ? purchase.salePrice
+              : purchase.totalCost / purchase.quantity;
+
+            if (isOnSale && purchase.salePrice !== null) {
+              saleAmount += purchase.salePrice * deduct;
+            } else {
+              normalAmount += unitPrice * deduct;
+            }
+
+            allBatchDeductions.push({
+              purchaseId: purchase.id,
+              flowerId: item.flowerId,
+              flowerName: flower?.name || item.flowerName,
+              quantity: deduct,
+              unitPrice: Math.round(unitPrice * 100) / 100,
+              isOnSale,
+            });
+
             purchase.remainingStems -= deduct;
             remainingToDeduct -= deduct;
           }
 
           flowerUsageDetailed.push({
             flowerId: item.flowerId,
-            flowerName: item.flowerName,
+            flowerName: flower?.name || item.flowerName,
             quantity: item.quantity * data.quantity,
           });
         }
@@ -230,16 +389,21 @@ export const useFlowerStore = create<FlowerStore>()(
           quantity: data.quantity,
           subtotal: template.price * data.quantity,
           flowerUsage: flowerUsageDetailed,
+          batchDeductions: allBatchDeductions,
         };
+
+        const totalAmount = Math.round((saleAmount + normalAmount) * 100) / 100;
 
         const newOrder: Order = {
           id: generateId('ord'),
           customerName: data.customerName,
           customerPhone: data.customerPhone,
           orderDate: new Date().toISOString().split('T')[0],
-          totalAmount: template.price * data.quantity,
+          totalAmount,
           items: [orderItem],
           status: 'completed',
+          saleAmount: Math.round(saleAmount * 100) / 100,
+          normalAmount: Math.round(normalAmount * 100) / 100,
         };
 
         set((state) => ({
@@ -252,25 +416,24 @@ export const useFlowerStore = create<FlowerStore>()(
 
       cancelOrder: (orderId) => {
         const order = get().orders.find((o) => o.id === orderId);
-        if (!order || order.status === 'cancelled') return;
+        if (!order) {
+          return { success: false, message: '订单不存在' };
+        }
+
+        if (order.status === 'cancelled') {
+          return { success: false, message: '订单已取消' };
+        }
 
         const updatedPurchases = [...get().purchases];
 
         for (const item of order.items) {
-          for (const usage of item.flowerUsage) {
-            let remainingToAdd = usage.quantity;
-            const flowerPurchases = updatedPurchases
-              .filter((p) => p.flowerId === usage.flowerId)
-              .sort((a, b) => new Date(b.purchaseDate).getTime() - new Date(a.purchaseDate).getTime());
-
-            for (const purchase of flowerPurchases) {
-              if (remainingToAdd <= 0) break;
-              const add = Math.min(
-                purchase.quantity - purchase.remainingStems,
-                remainingToAdd
+          for (const deduction of item.batchDeductions) {
+            const purchase = updatedPurchases.find((p) => p.id === deduction.purchaseId);
+            if (purchase) {
+              purchase.remainingStems = Math.min(
+                purchase.remainingStems + deduction.quantity,
+                purchase.quantity
               );
-              purchase.remainingStems += add;
-              remainingToAdd -= add;
             }
           }
         }
@@ -281,33 +444,44 @@ export const useFlowerStore = create<FlowerStore>()(
             o.id === orderId ? { ...o, status: 'cancelled' } : o
           ),
         }));
+
+        return { success: true, message: '订单取消成功' };
       },
 
       addWastage: (data) => {
-        const flower = get().getFlowerById(data.flowerId);
-        if (!flower) return;
+        const purchase = get().purchases.find((p) => p.id === data.purchaseId);
+        if (!purchase) {
+          return { success: false, message: '批次不存在' };
+        }
+
+        if (purchase.remainingStems < data.quantity) {
+          return { success: false, message: '该批次剩余库存不足' };
+        }
+
+        if (data.quantity <= 0) {
+          return { success: false, message: '报损数量必须大于0' };
+        }
 
         const updatedPurchases = [...get().purchases];
-        let remainingToDeduct = data.quantity;
-        let totalCost = 0;
+        const purchaseIndex = updatedPurchases.findIndex((p) => p.id === data.purchaseId);
 
-        const flowerPurchases = updatedPurchases
-          .filter((p) => p.flowerId === data.flowerId && p.remainingStems > 0)
-          .sort((a, b) => new Date(a.purchaseDate).getTime() - new Date(b.purchaseDate).getTime());
-
-        for (const purchase of flowerPurchases) {
-          if (remainingToDeduct <= 0) break;
-          const deduct = Math.min(purchase.remainingStems, remainingToDeduct);
-          const costPerStem = purchase.totalCost / purchase.quantity;
-          totalCost += costPerStem * deduct;
-          purchase.remainingStems -= deduct;
-          remainingToDeduct -= deduct;
+        if (purchaseIndex === -1) {
+          return { success: false, message: '批次不存在' };
         }
+
+        const targetPurchase = updatedPurchases[purchaseIndex];
+        targetPurchase.remainingStems -= data.quantity;
+
+        const costPerStem = targetPurchase.totalCost / targetPurchase.quantity;
+        const totalCost = costPerStem * data.quantity;
+
+        const flower = get().getFlowerById(targetPurchase.flowerId);
 
         const wastage: Wastage = {
           id: generateId('wst'),
-          flowerId: data.flowerId,
-          flowerName: flower.name,
+          flowerId: targetPurchase.flowerId,
+          flowerName: flower?.name || targetPurchase.flowerName,
+          purchaseId: data.purchaseId,
           quantity: data.quantity,
           reason: data.reason,
           date: data.date,
@@ -318,6 +492,8 @@ export const useFlowerStore = create<FlowerStore>()(
           purchases: updatedPurchases,
           wastages: [wastage, ...state.wastages],
         }));
+
+        return { success: true, message: '报损成功', wastage };
       },
 
       getLowStockFlowers: () => {
@@ -357,6 +533,38 @@ export const useFlowerStore = create<FlowerStore>()(
     }),
     {
       name: 'flower-shop-storage',
+      version: 2,
+      migrate: (state: any, version: number) => {
+        if (version < 2) {
+          const migrated = { ...state };
+          
+          migrated.purchases = (migrated.purchases || []).map((p: any) => ({
+            ...p,
+            isOnSale: p.isOnSale ?? false,
+            salePrice: p.salePrice ?? null,
+            saleReason: p.saleReason ?? '',
+            saleEndDate: p.saleEndDate ?? null,
+          }));
+          
+          migrated.orders = (migrated.orders || []).map((o: any) => ({
+            ...o,
+            saleAmount: o.saleAmount ?? 0,
+            normalAmount: o.normalAmount ?? o.totalAmount ?? 0,
+            items: (o.items || []).map((item: any) => ({
+              ...item,
+              batchDeductions: item.batchDeductions ?? [],
+            })),
+          }));
+          
+          migrated.wastages = (migrated.wastages || []).map((w: any) => ({
+            ...w,
+            purchaseId: w.purchaseId ?? '',
+          }));
+          
+          return migrated;
+        }
+        return state;
+      },
     }
   )
 );

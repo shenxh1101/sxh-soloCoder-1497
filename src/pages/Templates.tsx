@@ -13,6 +13,7 @@ export default function Templates() {
   const [price, setPrice] = useState('');
   const [description, setDescription] = useState('');
   const [items, setItems] = useState<BouquetItem[]>([]);
+  const [showMergeTip, setShowMergeTip] = useState(false);
 
   const handleOpenModal = (template?: BouquetTemplate) => {
     if (template) {
@@ -28,6 +29,7 @@ export default function Templates() {
       setDescription('');
       setItems([]);
     }
+    setShowMergeTip(false);
     setIsModalOpen(true);
   };
 
@@ -38,6 +40,7 @@ export default function Templates() {
     setPrice('');
     setDescription('');
     setItems([]);
+    setShowMergeTip(false);
   };
 
   const handleAddItem = () => {
@@ -78,6 +81,25 @@ export default function Templates() {
     setItems(newItems);
   };
 
+  const mergeItems = (itemsToMerge: BouquetItem[]): { merged: BouquetItem[]; mergedCount: number } => {
+    const mergedMap = new Map<string, BouquetItem>();
+    const originalCount = itemsToMerge.length;
+
+    for (const item of itemsToMerge) {
+      const existing = mergedMap.get(item.flowerId);
+      if (existing) {
+        existing.quantity += item.quantity;
+      } else {
+        mergedMap.set(item.flowerId, { ...item });
+      }
+    }
+
+    const merged = Array.from(mergedMap.values());
+    const mergedCount = originalCount - merged.length;
+
+    return { merged, mergedCount };
+  };
+
   const handleSubmit = () => {
     if (!name || !price || parseFloat(price) <= 0 || items.length === 0) {
       return;
@@ -86,19 +108,26 @@ export default function Templates() {
     const validItems = items.filter((item) => item.quantity > 0);
     if (validItems.length === 0) return;
 
+    const { merged, mergedCount } = mergeItems(validItems);
+
+    if (mergedCount > 0) {
+      setShowMergeTip(true);
+      setTimeout(() => setShowMergeTip(false), 3000);
+    }
+
     if (editingTemplate) {
       updateTemplate(editingTemplate.id, {
         name,
         price: parseFloat(price),
         description,
-        items: validItems,
+        items: merged,
       });
     } else {
       addTemplate({
         name,
         price: parseFloat(price),
         description,
-        items: validItems,
+        items: merged,
       });
     }
 
@@ -117,6 +146,12 @@ export default function Templates() {
     parseFloat(price) > 0 &&
     items.length > 0 &&
     items.every((item) => item.quantity > 0);
+
+  const totalStems = items.reduce((sum, item) => sum + item.quantity, 0);
+
+  const { merged: previewMerged, mergedCount: previewMergeCount } = mergeItems(
+    items.filter((item) => item.quantity > 0)
+  );
 
   return (
     <div className="space-y-6">
@@ -215,6 +250,12 @@ export default function Templates() {
         className="max-w-lg"
       >
         <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+          {showMergeTip && (
+            <div className="bg-sage-50 border border-sage-200 rounded-xl p-3 text-sm text-sage-700 animate-fade-in">
+              ✅ 已自动合并相同花材
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-stone-700 mb-1.5">
               花束名称
@@ -241,6 +282,9 @@ export default function Templates() {
               step="0.01"
               className="w-full px-4 py-2.5 rounded-xl border border-rose-200 bg-white text-stone-700 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-rose-300 focus:border-rose-300 transition-all"
             />
+            {price !== '' && parseFloat(price) <= 0 && (
+              <p className="text-xs text-red-500 mt-1">售价必须大于0</p>
+            )}
           </div>
 
           <div>
@@ -276,11 +320,16 @@ export default function Templates() {
             ) : (
               <div className="space-y-2">
                 {items.map((item, index) => {
-                  const flower = flowers.find((f) => f.id === item.flowerId);
+                  const hasDuplicate = items.filter((i) => i.flowerId === item.flowerId).length > 1;
                   return (
                     <div
                       key={index}
-                      className="flex items-center gap-2 p-3 bg-rose-50/50 rounded-xl animate-fade-in"
+                      className={cn(
+                        'flex items-center gap-2 p-3 rounded-xl animate-fade-in',
+                        hasDuplicate && item.quantity > 0
+                          ? 'bg-amber-50 border border-amber-200'
+                          : 'bg-rose-50/50'
+                      )}
                     >
                       <div className="flex-1">
                         <select
@@ -301,7 +350,12 @@ export default function Templates() {
                           value={item.quantity}
                           onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
                           min="1"
-                          className="w-full px-3 py-2 rounded-lg border border-rose-200 bg-white text-stone-700 text-sm text-center focus:outline-none focus:ring-2 focus:ring-rose-300 focus:border-rose-300 transition-all"
+                          className={cn(
+                            'w-full px-3 py-2 rounded-lg border bg-white text-stone-700 text-sm text-center focus:outline-none focus:ring-2 focus:border-rose-300 transition-all',
+                            item.quantity <= 0
+                              ? 'border-red-300 focus:ring-red-300'
+                              : 'border-rose-200 focus:ring-rose-300'
+                          )}
                         />
                       </div>
                       <span className="text-xs text-stone-400">支</span>
@@ -316,14 +370,43 @@ export default function Templates() {
                 })}
               </div>
             )}
+
+            {items.length > 0 && items.some((item) => item.quantity <= 0) && (
+              <p className="text-xs text-red-500 mt-2">所有花材数量必须大于0</p>
+            )}
+
+            {previewMergeCount > 0 && items.every((item) => item.quantity > 0) && (
+              <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-700">
+                💡 检测到 <span className="font-semibold">{previewMergeCount}</span> 种重复花材，保存时将自动合并
+                <div className="mt-1.5 pt-1.5 border-t border-amber-200">
+                  <span className="text-amber-600">合并后：</span>
+                  {previewMerged.map((item, i) => {
+                    const flower = flowers.find((f) => f.id === item.flowerId);
+                    return (
+                      <span key={item.flowerId} className="inline-flex items-center mr-2">
+                        {flower?.emoji} {item.flowerName} ×{item.quantity}
+                        {i < previewMerged.length - 1 && <span className="mx-1">·</span>}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {isFormValid && items.length > 0 && (
             <div className="bg-sage-50 rounded-xl p-3 text-sm text-sage-700">
               <p>
-                共 <span className="font-semibold">{items.length}</span> 种花材，
+                共 <span className="font-semibold">{previewMerged.length}</span> 种花材，
+                <span className="font-semibold">{totalStems}</span> 支，
                 合计 <span className="font-semibold">¥{price}</span>
               </p>
+            </div>
+          )}
+
+          {items.length === 0 && (
+            <div className="bg-red-50 rounded-xl p-3 text-sm text-red-700">
+              请至少添加一种花材
             </div>
           )}
 

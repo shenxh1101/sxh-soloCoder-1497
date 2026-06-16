@@ -85,6 +85,10 @@ export const defaultPurchases: Purchase[] = [
     purchaseDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     remainingStems: 100,
     totalCost: 175,
+    isOnSale: false,
+    salePrice: null,
+    saleReason: '',
+    saleEndDate: null,
   },
   {
     id: 'pur-2',
@@ -96,6 +100,10 @@ export const defaultPurchases: Purchase[] = [
     purchaseDate: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     remainingStems: 30,
     totalCost: 135,
+    isOnSale: false,
+    salePrice: null,
+    saleReason: '',
+    saleEndDate: null,
   },
   {
     id: 'pur-3',
@@ -107,6 +115,10 @@ export const defaultPurchases: Purchase[] = [
     purchaseDate: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     remainingStems: 100,
     totalCost: 50,
+    isOnSale: false,
+    salePrice: null,
+    saleReason: '',
+    saleEndDate: null,
   },
   {
     id: 'pur-4',
@@ -118,6 +130,10 @@ export const defaultPurchases: Purchase[] = [
     purchaseDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     remainingStems: 60,
     totalCost: 84,
+    isOnSale: false,
+    salePrice: null,
+    saleReason: '',
+    saleEndDate: null,
   },
 ];
 

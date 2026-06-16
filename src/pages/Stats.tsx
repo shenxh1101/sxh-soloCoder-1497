@@ -12,6 +12,7 @@ import {
   PieChart,
   Pie,
   Cell,
+  Legend,
 } from 'recharts';
 
 const PIE_COLORS = ['#D4A5A5', '#9CAF88', '#E8D4A8', '#E8BFB4', '#B5C4A3', '#F0E3CA'];
@@ -47,27 +48,70 @@ export default function Stats() {
     return totalSales / totalOrders;
   }, [totalSales, totalOrders]);
 
-  const salesRankingData = useMemo(() => {
-    const flowerUsageMap = new Map<string, { name: string; quantity: number }>();
+  const totalSaleAmount = useMemo(() => {
+    return monthOrders.reduce((sum, o) => sum + (o.saleAmount || 0), 0);
+  }, [monthOrders]);
+
+  const saleStats = useMemo(() => {
+    const flowerSaleMap = new Map<string, { name: string; normalQuantity: number; saleQuantity: number; saleAmount: number; costAmount: number }>();
 
     for (const order of monthOrders) {
       for (const item of order.items) {
-        for (const usage of item.flowerUsage) {
-          const existing = flowerUsageMap.get(usage.flowerId);
+        const deductionsList = item.batchDeductions ?? [];
+        for (const deduction of deductionsList) {
+          const existing = flowerSaleMap.get(deduction.flowerId);
           if (existing) {
-            existing.quantity += usage.quantity;
+            if (deduction.isOnSale) {
+              existing.saleQuantity += deduction.quantity;
+              existing.saleAmount += deduction.unitPrice * deduction.quantity;
+            } else {
+              existing.normalQuantity += deduction.quantity;
+            }
           } else {
-            flowerUsageMap.set(usage.flowerId, {
-              name: usage.flowerName,
-              quantity: usage.quantity,
+            flowerSaleMap.set(deduction.flowerId, {
+              name: deduction.flowerName,
+              normalQuantity: deduction.isOnSale ? 0 : deduction.quantity,
+              saleQuantity: deduction.isOnSale ? deduction.quantity : 0,
+              saleAmount: deduction.isOnSale ? deduction.unitPrice * deduction.quantity : 0,
+              costAmount: 0,
             });
           }
         }
       }
     }
 
-    return Array.from(flowerUsageMap.values()).sort((a, b) => b.quantity - a.quantity);
+    return Array.from(flowerSaleMap.values());
   }, [monthOrders]);
+
+  const totalSaleQuantity = useMemo(() => {
+    return saleStats.reduce((sum, s) => sum + s.saleQuantity, 0);
+  }, [saleStats]);
+
+  const totalNormalQuantity = useMemo(() => {
+    return saleStats.reduce((sum, s) => sum + s.normalQuantity, 0);
+  }, [saleStats]);
+
+  const savedLossAmount = totalSaleAmount;
+
+  const salePieData = useMemo(() => {
+    const saleTotal = totalSaleQuantity;
+    const normalTotal = totalNormalQuantity;
+    return [
+      { name: '特价销量', value: saleTotal, color: '#F59E0B' },
+      { name: '正常销量', value: normalTotal, color: '#D4A5A5' },
+    ];
+  }, [totalSaleQuantity, totalNormalQuantity]);
+
+  const salesRankingData = useMemo(() => {
+    return saleStats
+      .map((s) => ({
+        name: s.name,
+        normalQuantity: s.normalQuantity,
+        saleQuantity: s.saleQuantity,
+        total: s.normalQuantity + s.saleQuantity,
+      }))
+      .sort((a, b) => b.total - a.total);
+  }, [saleStats]);
 
   const wastageStatsData = useMemo(() => {
     const flowerWastageMap = new Map<string, { name: string; quantity: number; cost: number }>();
@@ -131,7 +175,7 @@ export default function Stats() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         <StatCard
           title="总销售额"
           value={`¥${totalSales.toFixed(2)}`}
@@ -146,6 +190,18 @@ export default function Stats() {
           title="平均客单价"
           value={`¥${avgOrderValue.toFixed(2)}`}
           icon={<span className="text-2xl">📊</span>}
+        />
+        <StatCard
+          title="特价销售额"
+          value={`¥${totalSaleAmount.toFixed(2)}`}
+          icon={<span className="text-2xl">🔥</span>}
+          highlight="orange"
+        />
+        <StatCard
+          title="挽回损耗金额"
+          value={`¥${savedLossAmount.toFixed(2)}`}
+          icon={<span className="text-2xl">💚</span>}
+          highlight="sage"
         />
       </div>
 
@@ -181,23 +237,182 @@ export default function Stats() {
                     borderRadius: '12px',
                     boxShadow: '0 4px 12px rgba(212, 165, 165, 0.15)',
                   }}
-                  formatter={(value: number) => [`${value} 支`, '销量']}
+                  formatter={(value: number, name: string) => {
+                    const label = name === 'normalQuantity' ? '正常销量' : name === 'saleQuantity' ? '特价销量' : name;
+                    return [`${value} 支`, label];
+                  }}
+                />
+                <Legend
+                  wrapperStyle={{ paddingTop: '10px' }}
+                  formatter={(value: string) => {
+                    return value === 'normalQuantity' ? '正常销量' : value === 'saleQuantity' ? '特价销量' : value;
+                  }}
                 />
                 <defs>
                   <linearGradient id="roseGradient" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="#D4A5A5" />
                     <stop offset="100%" stopColor="#E8BFB4" />
                   </linearGradient>
+                  <linearGradient id="orangeGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#F59E0B" />
+                    <stop offset="100%" stopColor="#FBBF24" />
+                  </linearGradient>
                 </defs>
                 <Bar
-                  dataKey="quantity"
+                  dataKey="normalQuantity"
+                  stackId="a"
                   fill="url(#roseGradient)"
+                  radius={[0, 0, 0, 0]}
+                  animationDuration={800}
+                  animationBegin={0}
+                />
+                <Bar
+                  dataKey="saleQuantity"
+                  stackId="a"
+                  fill="url(#orangeGradient)"
                   radius={[8, 8, 0, 0]}
                   animationDuration={800}
                   animationBegin={0}
                 />
               </BarChart>
             </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-card border border-orange-100/50 p-5">
+        <h2 className="text-lg font-semibold text-stone-800 font-serif mb-4 flex items-center gap-2">
+          <span>💰</span>
+          特价效果
+        </h2>
+        {totalSaleQuantity === 0 ? (
+          <div className="text-center py-12 text-stone-400">
+            <p className="text-4xl mb-2">🔥</p>
+            <p>本月暂无特价销售数据</p>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="bg-orange-50 rounded-xl p-4">
+                <p className="text-sm text-orange-600 mb-1">特价卖出数量</p>
+                <p className="text-2xl font-bold text-orange-500 font-serif">
+                  {totalSaleQuantity} 支
+                </p>
+                <div className="mt-2 space-y-1">
+                  {saleStats.filter(s => s.saleQuantity > 0).map((s) => (
+                    <div key={s.name} className="flex justify-between text-xs text-orange-700">
+                      <span>{s.name}</span>
+                      <span>{s.saleQuantity} 支</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="bg-sage-50 rounded-xl p-4">
+                <p className="text-sm text-sage-600 mb-1">挽回损耗金额</p>
+                <p className="text-2xl font-bold text-sage-500 font-serif">
+                  ¥{savedLossAmount.toFixed(2)}
+                </p>
+                <p className="text-xs text-sage-600 mt-2">
+                  通过特价销售减少了库存损耗
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div>
+                <p className="text-sm font-medium text-stone-700 mb-3">正常销量 vs 特价销量</p>
+                <div className="h-56">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                      data={[
+                        { name: '正常销售', 数量: totalNormalQuantity, fill: '#D4A5A5' },
+                        { name: '特价销售', 数量: totalSaleQuantity, fill: '#F59E0B' },
+                      ]}
+                      margin={{ top: 10, right: 20, left: 0, bottom: 5 }}
+                    >
+                      <XAxis
+                        dataKey="name"
+                        axisLine={{ stroke: '#F2D8D0' }}
+                        tickLine={false}
+                        tick={{ fill: '#78716c', fontSize: 12 }}
+                      />
+                      <YAxis
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fill: '#78716c', fontSize: 12 }}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: '#fff',
+                          border: '1px solid #F2D8D0',
+                          borderRadius: '12px',
+                          boxShadow: '0 4px 12px rgba(212, 165, 165, 0.15)',
+                        }}
+                        formatter={(value: number) => [`${value} 支`, '销量']}
+                      />
+                      <defs>
+                        <linearGradient id="roseGradient2" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#D4A5A5" />
+                          <stop offset="100%" stopColor="#E8BFB4" />
+                        </linearGradient>
+                        <linearGradient id="orangeGradient2" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#F59E0B" />
+                          <stop offset="100%" stopColor="#FBBF24" />
+                        </linearGradient>
+                      </defs>
+                      <Bar
+                        dataKey="数量"
+                        fill="#D4A5A5"
+                        radius={[8, 8, 0, 0]}
+                        animationDuration={800}
+                        animationBegin={0}
+                      >
+                        {[
+                          <Cell key="normal" fill="url(#roseGradient2)" />,
+                          <Cell key="sale" fill="url(#orangeGradient2)" />,
+                        ]}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium text-stone-700 mb-3">特价销售占比</p>
+                <div className="h-56">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={salePieData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={50}
+                        outerRadius={80}
+                        paddingAngle={2}
+                        dataKey="value"
+                        animationDuration={800}
+                        animationBegin={0}
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                        labelLine={{ stroke: '#A8A29E', strokeWidth: 1 }}
+                      >
+                        {salePieData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: '#fff',
+                          border: '1px solid #F2D8D0',
+                          borderRadius: '12px',
+                          boxShadow: '0 4px 12px rgba(212, 165, 165, 0.15)',
+                        }}
+                        formatter={(value: number) => [`${value} 支`, '销量']}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>

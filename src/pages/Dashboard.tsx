@@ -4,9 +4,12 @@ import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { cn } from '../lib/utils';
 import { formatDateCN } from '../utils/date';
-import type { BouquetTemplate } from '../types';
+import type { BouquetTemplate, Purchase } from '../types';
 
 type QuickOrderStep = 1 | 2 | 3;
+type SaleReason = '快蔫了' | '尾货清仓' | '节日促销' | '其他';
+
+const saleReasons: SaleReason[] = ['快蔫了', '尾货清仓', '节日促销', '其他'];
 
 export default function Dashboard() {
   const {
@@ -15,12 +18,16 @@ export default function Dashboard() {
     templates,
     getStockByFlowerId,
     getExpiringPurchases,
+    getSalePurchases,
     addPurchase,
     addWastage,
+    setSale,
+    cancelSale,
     checkStockForOrder,
     createOrder,
   } = useFlowerStore();
   const expiringPurchases = getExpiringPurchases(3);
+  const salePurchases = getSalePurchases();
 
   const [isPurchaseModalOpen, setIsPurchaseModalOpen] = useState(false);
   const [selectedFlower, setSelectedFlower] = useState<string>('');
@@ -38,12 +45,48 @@ export default function Dashboard() {
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
 
+  const [isSaleModalOpen, setIsSaleModalOpen] = useState(false);
+  const [selectedPurchase, setSelectedPurchase] = useState<Purchase | null>(null);
+  const [salePrice, setSalePrice] = useState<string>('');
+  const [saleReason, setSaleReason] = useState<SaleReason>('快蔫了');
+  const [saleNote, setSaleNote] = useState<string>('');
+  const [saleEndDate, setSaleEndDate] = useState<string>(() => {
+    const date = new Date();
+    date.setDate(date.getDate() + 3);
+    return date.toISOString().split('T')[0];
+  });
+
   const stockCheck = useMemo(() => {
     if (!selectedTemplate || !orderQuantity || parseInt(orderQuantity) <= 0) {
       return null;
     }
     return checkStockForOrder(selectedTemplate.id, parseInt(orderQuantity));
   }, [selectedTemplate, orderQuantity, checkStockForOrder]);
+
+  const getSaleStemsByFlowerId = (flowerId: string): number => {
+    return purchases
+      .filter((p) => p.flowerId === flowerId && p.isOnSale && p.saleEndDate && new Date(p.saleEndDate) >= new Date(new Date().setHours(0, 0, 0, 0)))
+      .reduce((sum, p) => sum + p.remainingStems, 0);
+  };
+
+  const hasActiveSaleByFlowerId = (flowerId: string): boolean => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return purchases.some((p) => 
+      p.flowerId === flowerId && 
+      p.isOnSale && 
+      p.remainingStems > 0 &&
+      (!p.saleEndDate || new Date(p.saleEndDate) >= today)
+    );
+  };
+
+  const getOriginalPricePerStem = (purchase: Purchase): number => {
+    return purchase.totalCost / purchase.quantity;
+  };
+
+  const getDiscountPercent = (originalPrice: number, salePrice: number): number => {
+    return Math.round((1 - salePrice / originalPrice) * 100);
+  };
 
   const handleOpenPurchaseModal = () => {
     setIsPurchaseModalOpen(true);
@@ -83,6 +126,57 @@ export default function Dashboard() {
     pricePerBunch &&
     parseFloat(pricePerBunch) > 0 &&
     purchaseDate;
+
+  const handleOpenSaleModal = (purchase: Purchase) => {
+    setSelectedPurchase(purchase);
+    const originalPrice = getOriginalPricePerStem(purchase);
+    setSalePrice((originalPrice * 0.7).toFixed(2));
+    setSaleReason('快蔫了');
+    setSaleNote('');
+    const date = new Date();
+    date.setDate(date.getDate() + 3);
+    setSaleEndDate(date.toISOString().split('T')[0]);
+    setIsSaleModalOpen(true);
+  };
+
+  const handleCloseSaleModal = () => {
+    setIsSaleModalOpen(false);
+    setSelectedPurchase(null);
+    setSalePrice('');
+    setSaleNote('');
+  };
+
+  const handleSubmitSale = () => {
+    if (!selectedPurchase || !salePrice || parseFloat(salePrice) <= 0) {
+      return;
+    }
+
+    const fullReason = saleNote ? `${saleReason}：${saleNote}` : saleReason;
+    const result = setSale(
+      selectedPurchase.id,
+      parseFloat(salePrice),
+      fullReason,
+      saleEndDate
+    );
+
+    if (result.success) {
+      handleCloseSaleModal();
+    } else {
+      alert(result.message);
+    }
+  };
+
+  const isSaleFormValid =
+    selectedPurchase &&
+    salePrice &&
+    parseFloat(salePrice) > 0 &&
+    saleEndDate;
+
+  const handleCancelSale = (purchaseId: string) => {
+    if (window.confirm('确定要取消该批次的特价吗？')) {
+      cancelSale(purchaseId);
+    }
+  };
 
   const handleOpenOrderModal = () => {
     setIsOrderModalOpen(true);
@@ -152,7 +246,7 @@ export default function Dashboard() {
   const handleWastage = (purchaseId: string, flowerId: string, quantity: number) => {
     if (window.confirm(`确定要报损 ${quantity} 支花材吗？`)) {
       addWastage({
-        flowerId,
+        purchaseId,
         quantity,
         reason: '花期过了',
         date: new Date().toISOString().split('T')[0],
@@ -165,6 +259,8 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {flowers.map((flower) => {
           const stock = getStockByFlowerId(flower.id);
+          const saleStems = getSaleStemsByFlowerId(flower.id);
+          const hasActiveSale = hasActiveSaleByFlowerId(flower.id);
           const isLowStock = stock < flower.safetyStock;
 
           return (
@@ -181,8 +277,15 @@ export default function Dashboard() {
             >
               <div className="flex items-center gap-3 mb-3">
                 <span className="text-3xl">{flower.emoji}</span>
-                <div>
-                  <h3 className="font-semibold text-stone-700">{flower.name}</h3>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-stone-700">{flower.name}</h3>
+                    {hasActiveSale && (
+                      <span className="px-2 py-0.5 text-xs font-medium text-white rounded-full bg-gradient-to-r from-orange-400 to-amber-500">
+                        🔥 特价中
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-stone-400">安全库存 {flower.safetyStock} 支</p>
                 </div>
               </div>
@@ -196,6 +299,11 @@ export default function Dashboard() {
                   {stock}
                 </p>
                 <p className="text-sm text-stone-400 mt-1">支</p>
+                {saleStems > 0 && (
+                  <p className="text-xs text-orange-500 mt-1">
+                    🔥 {saleStems} 支特价中
+                  </p>
+                )}
               </div>
             </div>
           );
@@ -223,6 +331,81 @@ export default function Dashboard() {
         </Button>
       </div>
 
+      {salePurchases.length > 0 && (
+        <div className="bg-white rounded-2xl shadow-card border border-orange-100/50 overflow-hidden">
+          <div className="px-5 py-4 border-b border-orange-100 bg-gradient-to-r from-orange-50/50 to-amber-50/50">
+            <h2 className="text-lg font-semibold text-stone-800 font-serif flex items-center gap-2">
+              <span>🔥</span>
+              特价专区
+            </h2>
+          </div>
+          <div className="p-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {salePurchases.map((purchase) => {
+                const flower = flowers.find((f) => f.id === purchase.flowerId);
+                const originalPrice = getOriginalPricePerStem(purchase);
+                const discount = purchase.salePrice ? getDiscountPercent(originalPrice, purchase.salePrice) : 0;
+
+                return (
+                  <div
+                    key={purchase.id}
+                    className="p-4 rounded-xl border-2 border-orange-200 bg-gradient-to-br from-orange-50/80 to-amber-50/50 transition-all duration-300 hover:shadow-md"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-2xl">{flower?.emoji || '🌸'}</span>
+                        <h4 className="font-semibold text-stone-700">{purchase.flowerName}</h4>
+                      </div>
+                      <span className="px-2 py-0.5 text-xs font-bold text-white rounded-full bg-gradient-to-r from-orange-500 to-amber-500">
+                        -{discount}%
+                      </span>
+                    </div>
+
+                    <div className="space-y-2 mb-4">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-stone-500">原单价</span>
+                        <span className="text-stone-400 line-through">¥{originalPrice.toFixed(2)}/支</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-stone-600">特价</span>
+                        <span className="text-xl font-bold text-orange-500 font-serif">
+                          ¥{purchase.salePrice?.toFixed(2)}/支
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-stone-500">剩余支数</span>
+                        <span className="font-medium text-stone-700">{purchase.remainingStems} 支</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-stone-500">截止日期</span>
+                        <span className="font-medium text-stone-700">
+                          {purchase.saleEndDate && formatDateCN(purchase.saleEndDate)}
+                        </span>
+                      </div>
+                      <div className="pt-2 border-t border-orange-100">
+                        <p className="text-xs text-stone-500">
+                          <span className="font-medium">原因：</span>
+                          {purchase.saleReason}
+                        </p>
+                      </div>
+                    </div>
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="w-full text-orange-600 hover:text-orange-700 hover:bg-orange-100/50"
+                      onClick={() => handleCancelSale(purchase.id)}
+                    >
+                      取消特价
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white rounded-2xl shadow-card border border-rose-100/50 overflow-hidden">
         <div className="px-5 py-4 border-b border-rose-100">
           <h2 className="text-lg font-semibold text-stone-800 font-serif flex items-center gap-2">
@@ -243,6 +426,10 @@ export default function Dashboard() {
                 const progressPercent = Math.max(0, (purchase.daysLeft / shelfLife) * 100);
                 const isUrgent = purchase.daysLeft <= 2;
                 const isWarning = purchase.daysLeft <= 3;
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const isOnSale = purchase.isOnSale && 
+                  (!purchase.saleEndDate || new Date(purchase.saleEndDate) >= today);
 
                 return (
                   <div
@@ -312,9 +499,24 @@ export default function Dashboard() {
                         >
                           报损
                         </Button>
-                        <Button variant="secondary" size="sm">
-                          特价
-                        </Button>
+                        {isOnSale ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-orange-600 hover:text-orange-700 hover:bg-orange-50"
+                            onClick={() => handleCancelSale(purchase.id)}
+                          >
+                            取消特价
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handleOpenSaleModal(purchase)}
+                          >
+                            特价
+                          </Button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -440,6 +642,113 @@ export default function Dashboard() {
             </Button>
           </div>
         </div>
+      </Modal>
+
+      <Modal
+        isOpen={isSaleModalOpen}
+        onClose={handleCloseSaleModal}
+        title="设置特价"
+      >
+        {selectedPurchase && (
+          <div className="space-y-4">
+            <div className="bg-orange-50 rounded-xl p-4">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">
+                  {flowers.find((f) => f.id === selectedPurchase.flowerId)?.emoji || '🌸'}
+                </span>
+                <div>
+                  <p className="font-medium text-stone-700">{selectedPurchase.flowerName}</p>
+                  <p className="text-sm text-stone-500">
+                    剩余 {selectedPurchase.remainingStems} 支 · 原单价 ¥
+                    {getOriginalPricePerStem(selectedPurchase).toFixed(2)}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-stone-700 mb-1.5">
+                折扣价（元/支）<span className="text-red-400">*</span>
+              </label>
+              <input
+                type="number"
+                value={salePrice}
+                onChange={(e) => setSalePrice(e.target.value)}
+                placeholder="请输入特价"
+                min="0"
+                step="0.01"
+                className="w-full px-4 py-2.5 rounded-xl border border-orange-200 bg-white text-stone-700 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-orange-300 focus:border-orange-300 transition-all"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-stone-700 mb-1.5">
+                特价原因 <span className="text-red-400">*</span>
+              </label>
+              <select
+                value={saleReason}
+                onChange={(e) => setSaleReason(e.target.value as SaleReason)}
+                className="w-full px-4 py-2.5 rounded-xl border border-orange-200 bg-white text-stone-700 focus:outline-none focus:ring-2 focus:ring-orange-300 focus:border-orange-300 transition-all mb-2"
+              >
+                {saleReasons.map((reason) => (
+                  <option key={reason} value={reason}>
+                    {reason}
+                  </option>
+                ))}
+              </select>
+              <input
+                type="text"
+                value={saleNote}
+                onChange={(e) => setSaleNote(e.target.value)}
+                placeholder="备注（可选）"
+                className="w-full px-4 py-2.5 rounded-xl border border-orange-200 bg-white text-stone-700 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-orange-300 focus:border-orange-300 transition-all"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-stone-700 mb-1.5">
+                截止日期 <span className="text-red-400">*</span>
+              </label>
+              <input
+                type="date"
+                value={saleEndDate}
+                onChange={(e) => setSaleEndDate(e.target.value)}
+                className="w-full px-4 py-2.5 rounded-xl border border-orange-200 bg-white text-stone-700 focus:outline-none focus:ring-2 focus:ring-orange-300 focus:border-orange-300 transition-all"
+              />
+            </div>
+
+            {isSaleFormValid && (
+              <div className="bg-sage-50 rounded-xl p-3 text-sm text-sage-700">
+                <p>
+                  折扣力度：
+                  <span className="font-semibold text-orange-500">
+                    {getDiscountPercent(getOriginalPricePerStem(selectedPurchase), parseFloat(salePrice || '0'))}% OFF
+                  </span>
+                </p>
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              <Button
+                variant="ghost"
+                size="md"
+                className="flex-1"
+                onClick={handleCloseSaleModal}
+              >
+                取消
+              </Button>
+              <Button
+                variant="primary"
+                size="md"
+                className="flex-1 bg-gradient-to-r from-orange-400 to-amber-500 hover:from-orange-500 hover:to-amber-600 shadow-sm shadow-orange-200"
+                onClick={handleSubmitSale}
+                disabled={!isSaleFormValid}
+              >
+                确认设置特价
+              </Button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       <Modal
