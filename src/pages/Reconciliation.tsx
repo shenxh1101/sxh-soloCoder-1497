@@ -3,9 +3,18 @@ import { useFlowerStore } from '../store/useFlowerStore';
 import { StatCard } from '../components/ui/StatCard';
 import { cn } from '../lib/utils';
 import { formatDateCN, getCurrentMonth } from '../utils/date';
-import type { BatchDeduction } from '../types';
+import type { BatchDeduction, Purchase } from '../types';
 
 type StatusFilter = 'all' | 'completed' | 'cancelled';
+
+interface BatchProfitData {
+  purchase: Purchase;
+  purchaseCost: number;
+  normalIncome: number;
+  saleIncome: number;
+  wastageAmount: number;
+  profit: number;
+}
 
 const isInMonth = (dateStr: string, monthStr: string): boolean => {
   const date = new Date(dateStr);
@@ -35,11 +44,77 @@ const calcSaleRatio = (saleAmount: number, normalAmount: number): number => {
 };
 
 export default function Reconciliation() {
-  const { orders, purchases } = useFlowerStore();
+  const { orders, purchases, wastages } = useFlowerStore();
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [searchKeyword, setSearchKeyword] = useState('');
+
+  const batchProfitMap = useMemo(() => {
+    const map = new Map<string, BatchProfitData>();
+
+    for (const purchase of purchases) {
+      map.set(purchase.id, {
+        purchase,
+        purchaseCost: purchase.totalCost,
+        normalIncome: 0,
+        saleIncome: 0,
+        wastageAmount: 0,
+        profit: 0,
+      });
+    }
+
+    for (const order of orders) {
+      if (order.status !== 'completed') continue;
+      for (const item of order.items) {
+        const deductions = item.batchDeductions ?? [];
+        if (deductions.length === 0) continue;
+
+        const itemTotalCost = deductions.reduce(
+          (sum, d) => sum + d.unitPrice * d.quantity,
+          0
+        );
+
+        if (itemTotalCost === 0) continue;
+
+        for (const deduction of deductions) {
+          const data = map.get(deduction.purchaseId);
+          if (!data) continue;
+
+          const deductionCost = deduction.unitPrice * deduction.quantity;
+          const allocationRatio = deductionCost / itemTotalCost;
+          const allocatedIncome = item.subtotal * allocationRatio;
+
+          if (deduction.isOnSale) {
+            data.saleIncome += allocatedIncome;
+          } else {
+            data.normalIncome += allocatedIncome;
+          }
+        }
+      }
+    }
+
+    for (const wastage of wastages) {
+      const data = map.get(wastage.purchaseId);
+      if (!data) continue;
+      data.wastageAmount += wastage.cost;
+    }
+
+    for (const data of map.values()) {
+      data.profit = data.normalIncome + data.saleIncome - data.purchaseCost - data.wastageAmount;
+    }
+
+    return map;
+  }, [orders, purchases, wastages]);
+
+  const repurchaseCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const order of orders) {
+      const count = map.get(order.customerPhone) || 0;
+      map.set(order.customerPhone, count + 1);
+    }
+    return map;
+  }, [orders]);
 
   const filteredOrders = useMemo(() => {
     let result = orders.filter((o) => isInMonth(o.orderDate, selectedMonth));
@@ -116,15 +191,17 @@ export default function Reconciliation() {
 
     const headers = [
       '日期',
-      '客户姓名',
-      '联系电话',
-      '花束模板',
+      '客户',
+      '电话',
+      '模板',
       '数量',
       '应收金额',
-      '订单状态',
-      '批次ID列表',
+      '状态',
+      '批次ID',
       '花材用量',
-      '特价占比(%)',
+      '特价占比',
+      '复购次数',
+      '批次利润',
       '备注',
     ];
 
@@ -152,7 +229,19 @@ export default function Reconciliation() {
         .join('; ');
       
       const orderSaleRatio = calcSaleRatio(order.saleAmount || 0, order.normalAmount || 0);
-      const saleRatioStr = (orderSaleRatio * 100).toFixed(1);
+      const saleRatioStr = `${(orderSaleRatio * 100).toFixed(1)}%`;
+      
+      const repurchaseCount = repurchaseCountMap.get(order.customerPhone) || 0;
+      
+      let hasLossBatch = false;
+      for (const pid of purchaseIds) {
+        const batchData = batchProfitMap.get(pid);
+        if (batchData && batchData.profit < 0) {
+          hasLossBatch = true;
+          break;
+        }
+      }
+      const batchProfitLabel = hasLossBatch ? '含亏损批次' : '-';
       
       return [
         formatDateCN(order.orderDate),
@@ -165,6 +254,8 @@ export default function Reconciliation() {
         purchaseIdStr,
         flowerUsageStr,
         saleRatioStr,
+        String(repurchaseCount),
+        batchProfitLabel,
         '',
       ];
     });

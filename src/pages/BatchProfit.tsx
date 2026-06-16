@@ -45,14 +45,27 @@ export default function BatchProfit() {
       if (order.status !== 'completed') continue;
       for (const item of order.items) {
         const deductions = item.batchDeductions ?? [];
+        if (deductions.length === 0) continue;
+
+        const itemTotalCost = deductions.reduce(
+          (sum, d) => sum + d.unitPrice * d.quantity,
+          0
+        );
+
+        if (itemTotalCost === 0) continue;
+
         for (const deduction of deductions) {
           const data = map.get(deduction.purchaseId);
           if (!data) continue;
-          const amount = deduction.unitPrice * deduction.quantity;
+
+          const deductionCost = deduction.unitPrice * deduction.quantity;
+          const allocationRatio = deductionCost / itemTotalCost;
+          const allocatedIncome = item.subtotal * allocationRatio;
+
           if (deduction.isOnSale) {
-            data.saleIncome += amount;
+            data.saleIncome += allocatedIncome;
           } else {
-            data.normalIncome += amount;
+            data.normalIncome += allocatedIncome;
           }
           data.soldQuantity += deduction.quantity;
         }
@@ -62,7 +75,7 @@ export default function BatchProfit() {
     for (const wastage of wastages) {
       const data = map.get(wastage.purchaseId);
       if (!data) continue;
-      data.wastageAmount -= wastage.cost;
+      data.wastageAmount += wastage.cost;
       data.wastageQuantity += wastage.quantity;
     }
 
@@ -70,7 +83,7 @@ export default function BatchProfit() {
       const { purchase } = data;
       const costPerStem = purchase.totalCost / purchase.quantity;
       data.remainingValue = purchase.remainingStems * costPerStem;
-      data.profit = data.normalIncome + data.saleIncome - data.purchaseCost + data.wastageAmount;
+      data.profit = data.normalIncome + data.saleIncome - data.purchaseCost - data.wastageAmount;
     }
 
     return map;
@@ -193,7 +206,7 @@ export default function BatchProfit() {
         />
         <StatCard
           title="总报损"
-          value={`¥${Math.abs(summaryStats.totalWastage).toFixed(2)}`}
+          value={`¥${summaryStats.totalWastage.toFixed(2)}`}
           icon={<span className="text-2xl">🗑️</span>}
           highlight="rose"
         />
