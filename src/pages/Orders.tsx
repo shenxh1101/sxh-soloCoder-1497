@@ -9,7 +9,7 @@ import type { BouquetTemplate, BatchDeduction } from '../types';
 type OrderStep = 1 | 2 | 3;
 
 export default function Orders() {
-  const { orders, templates, flowers, purchases, checkStockForOrder, createOrder, cancelOrder } =
+  const { orders, templates, flowers, purchases, checkStockForOrder, createOrder, cancelOrder, isPurchaseSaleActive } =
     useFlowerStore();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [step, setStep] = useState<OrderStep>(1);
@@ -111,15 +111,11 @@ export default function Orders() {
   };
 
   const getFlowerSaleInfo = (flowerId: string) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
     return purchases.find(
       (p) =>
         p.flowerId === flowerId &&
-        p.isOnSale &&
         p.salePrice !== null &&
-        p.remainingStems > 0 &&
-        (p.saleEndDate === null || new Date(p.saleEndDate) >= today)
+        isPurchaseSaleActive(p)
     );
   };
 

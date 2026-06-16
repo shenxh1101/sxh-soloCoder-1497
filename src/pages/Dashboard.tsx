@@ -19,6 +19,8 @@ export default function Dashboard() {
     getStockByFlowerId,
     getExpiringPurchases,
     getSalePurchases,
+    getExpiredSalePurchases,
+    isPurchaseSaleActive,
     addPurchase,
     addWastage,
     setSale,
@@ -28,6 +30,7 @@ export default function Dashboard() {
   } = useFlowerStore();
   const expiringPurchases = getExpiringPurchases(3);
   const salePurchases = getSalePurchases();
+  const expiredSalePurchases = getExpiredSalePurchases();
 
   const [isPurchaseModalOpen, setIsPurchaseModalOpen] = useState(false);
   const [selectedFlower, setSelectedFlower] = useState<string>('');
@@ -65,18 +68,13 @@ export default function Dashboard() {
 
   const getSaleStemsByFlowerId = (flowerId: string): number => {
     return purchases
-      .filter((p) => p.flowerId === flowerId && p.isOnSale && p.saleEndDate && new Date(p.saleEndDate) >= new Date(new Date().setHours(0, 0, 0, 0)))
+      .filter((p) => p.flowerId === flowerId && isPurchaseSaleActive(p))
       .reduce((sum, p) => sum + p.remainingStems, 0);
   };
 
   const hasActiveSaleByFlowerId = (flowerId: string): boolean => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
     return purchases.some((p) => 
-      p.flowerId === flowerId && 
-      p.isOnSale && 
-      p.remainingStems > 0 &&
-      (!p.saleEndDate || new Date(p.saleEndDate) >= today)
+      p.flowerId === flowerId && isPurchaseSaleActive(p)
     );
   };
 
@@ -176,6 +174,14 @@ export default function Dashboard() {
     if (window.confirm('确定要取消该批次的特价吗？')) {
       cancelSale(purchaseId);
     }
+  };
+
+  const handleContinueSale = (purchase: Purchase) => {
+    handleOpenSaleModal(purchase);
+  };
+
+  const handleExpiredWastage = (purchase: Purchase) => {
+    handleWastage(purchase.id, purchase.flowerId, purchase.remainingStems);
   };
 
   const handleOpenOrderModal = () => {
@@ -406,6 +412,86 @@ export default function Dashboard() {
         </div>
       )}
 
+      {expiredSalePurchases.length > 0 && (
+        <div className="bg-white rounded-2xl shadow-card border border-stone-200/50 overflow-hidden">
+          <div className="px-5 py-4 border-b border-stone-200 bg-gradient-to-r from-stone-50/50 to-stone-100/30">
+            <h2 className="text-lg font-semibold text-stone-700 font-serif flex items-center gap-2">
+              <span>⏰</span>
+              特价已结束
+            </h2>
+          </div>
+          <div className="p-5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {expiredSalePurchases.map((purchase) => {
+                const flower = flowers.find((f) => f.id === purchase.flowerId);
+                const originalPrice = getOriginalPricePerStem(purchase);
+
+                return (
+                  <div
+                    key={purchase.id}
+                    className="p-4 rounded-xl border-2 border-stone-200 bg-gradient-to-br from-stone-50/60 to-stone-100/30 transition-all duration-300 hover:shadow-md"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="text-2xl opacity-60">{flower?.emoji || '🌸'}</span>
+                        <h4 className="font-semibold text-stone-600">{purchase.flowerName}</h4>
+                      </div>
+                      <span className="px-2 py-0.5 text-xs font-medium text-stone-500 rounded-full bg-stone-200">
+                        已结束
+                      </span>
+                    </div>
+
+                    <div className="space-y-2 mb-4">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-stone-500">剩余支数</span>
+                        <span className="font-medium text-stone-600">{purchase.remainingStems} 支</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-stone-500">原特价</span>
+                        <span className="font-medium text-stone-500 line-through">
+                          ¥{purchase.salePrice?.toFixed(2)}/支
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-stone-500">过期日期</span>
+                        <span className="font-medium text-stone-600">
+                          {purchase.saleEndDate && formatDateCN(purchase.saleEndDate)}
+                        </span>
+                      </div>
+                      <div className="pt-2 border-t border-stone-200">
+                        <p className="text-xs text-stone-500">
+                          <span className="font-medium">特价原因：</span>
+                          {purchase.saleReason}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => handleContinueSale(purchase)}
+                      >
+                        继续特价
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="flex-1 text-stone-600 hover:text-stone-700 hover:bg-stone-100"
+                        onClick={() => handleExpiredWastage(purchase)}
+                      >
+                        报损处理
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white rounded-2xl shadow-card border border-rose-100/50 overflow-hidden">
         <div className="px-5 py-4 border-b border-rose-100">
           <h2 className="text-lg font-semibold text-stone-800 font-serif flex items-center gap-2">
@@ -426,10 +512,7 @@ export default function Dashboard() {
                 const progressPercent = Math.max(0, (purchase.daysLeft / shelfLife) * 100);
                 const isUrgent = purchase.daysLeft <= 2;
                 const isWarning = purchase.daysLeft <= 3;
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                const isOnSale = purchase.isOnSale && 
-                  (!purchase.saleEndDate || new Date(purchase.saleEndDate) >= today);
+                const isOnSale = isPurchaseSaleActive(purchase);
 
                 return (
                   <div

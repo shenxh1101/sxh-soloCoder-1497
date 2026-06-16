@@ -7,7 +7,7 @@ import { formatDateCN, daysRemaining } from '../utils/date';
 import type { Purchase, Flower } from '../types';
 
 export default function Purchase() {
-  const { flowers, purchases, addPurchase, addWastage, setSale, cancelSale, orders } = useFlowerStore();
+  const { flowers, purchases, addPurchase, addWastage, setSale, cancelSale, orders, isPurchaseSaleActive } = useFlowerStore();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedFlower, setSelectedFlower] = useState<string>('');
   const [quantity, setQuantity] = useState<string>('');
@@ -282,9 +282,14 @@ export default function Purchase() {
                         <h3 className="font-semibold text-stone-800 text-lg">
                           {purchase.flowerName}
                         </h3>
-                        {purchase.isOnSale && (
+                        {isPurchaseSaleActive(purchase) && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-orange-100 text-orange-600 text-xs font-medium rounded-full">
                             🔥 特价中 ¥{purchase.salePrice}/支
+                          </span>
+                        )}
+                        {purchase.isOnSale && !isPurchaseSaleActive(purchase) && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-stone-100 text-stone-500 text-xs font-medium rounded-full">
+                            已结束
                           </span>
                         )}
                       </div>
@@ -352,6 +357,13 @@ export default function Purchase() {
                   </div>
                 </div>
 
+                {purchase.isOnSale && !isPurchaseSaleActive(purchase) && (
+                  <div className="mt-4 p-3 bg-stone-50 border border-stone-200 rounded-xl text-sm text-stone-500 flex items-center gap-2">
+                    <span>⏰</span>
+                    <span>该批次特价活动已于 {formatDateCN(purchase.saleEndDate!)} 结束</span>
+                  </div>
+                )}
+
                 <div className="mt-4 pt-4 border-t border-rose-100 flex flex-wrap gap-2">
                   <Button
                     variant="ghost"
@@ -361,13 +373,22 @@ export default function Purchase() {
                   >
                     报损
                   </Button>
-                  {purchase.isOnSale ? (
+                  {isPurchaseSaleActive(purchase) ? (
                     <Button
                       variant="secondary"
                       size="sm"
                       onClick={() => handleCancelSale(purchase.id)}
                     >
                       取消特价
+                    </Button>
+                  ) : purchase.isOnSale ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled
+                      className="text-stone-400 hover:bg-transparent hover:text-stone-400"
+                    >
+                      特价已结束
                     </Button>
                   ) : (
                     <Button
@@ -390,6 +411,46 @@ export default function Purchase() {
 
                 {isExpanded && (
                   <div className="mt-4 pt-4 border-t border-rose-100 animate-fade-in">
+                    {purchase.isOnSale && (
+                      <div className={cn(
+                        'mb-4 p-3 rounded-xl text-sm',
+                        isPurchaseSaleActive(purchase)
+                          ? 'bg-orange-50 border border-orange-200'
+                          : 'bg-stone-50 border border-stone-200'
+                      )}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span>{isPurchaseSaleActive(purchase) ? '🔥' : '⏰'}</span>
+                            <span className={cn(
+                              'font-medium',
+                              isPurchaseSaleActive(purchase) ? 'text-orange-700' : 'text-stone-500'
+                            )}>
+                              {isPurchaseSaleActive(purchase) ? '特价进行中' : '特价已结束'}
+                            </span>
+                          </div>
+                          <span className={cn(
+                            'font-semibold',
+                            isPurchaseSaleActive(purchase) ? 'text-orange-600' : 'text-stone-400'
+                          )}>
+                            ¥{purchase.salePrice}/支
+                          </span>
+                        </div>
+                        {purchase.saleReason && (
+                          <p className={cn(
+                            'mt-1.5 text-xs',
+                            isPurchaseSaleActive(purchase) ? 'text-orange-600' : 'text-stone-400'
+                          )}>
+                            原因：{purchase.saleReason}
+                          </p>
+                        )}
+                        <p className={cn(
+                          'mt-1 text-xs',
+                          isPurchaseSaleActive(purchase) ? 'text-orange-600' : 'text-stone-400'
+                        )}>
+                          结束日期：{formatDateCN(purchase.saleEndDate!)}
+                        </p>
+                      </div>
+                    )}
                     <h4 className="text-sm font-medium text-stone-700 mb-3">扣减历史</h4>
                     {deductionHistory.length === 0 ? (
                       <p className="text-sm text-stone-400 text-center py-4">暂无扣减记录</p>

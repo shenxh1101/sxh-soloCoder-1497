@@ -10,6 +10,7 @@ const menuItems = [
   { id: 'purchase', label: '进货管理', icon: '📦' },
   { id: 'bouquet', label: '花束模板', icon: '💐' },
   { id: 'order', label: '订单销售', icon: '🛒' },
+  { id: 'reconciliation', label: '订单对账', icon: '📋' },
   { id: 'stats', label: '月度统计', icon: '📊' },
 ]
 

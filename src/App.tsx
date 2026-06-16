@@ -5,6 +5,7 @@ import Purchase from '@/pages/Purchase';
 import Templates from '@/pages/Templates';
 import Orders from '@/pages/Orders';
 import Stats from '@/pages/Stats';
+import Reconciliation from '@/pages/Reconciliation';
 
 const pageMap: Record<string, string> = {
   '/': 'home',
@@ -12,6 +13,7 @@ const pageMap: Record<string, string> = {
   '/templates': 'bouquet',
   '/orders': 'order',
   '/stats': 'stats',
+  '/reconciliation': 'reconciliation',
 };
 
 const titleMap: Record<string, string> = {
@@ -20,6 +22,7 @@ const titleMap: Record<string, string> = {
   '/templates': '花束模板',
   '/orders': '订单销售',
   '/stats': '月度统计',
+  '/reconciliation': '订单对账',
 };
 
 function AppContent() {
@@ -35,6 +38,7 @@ function AppContent() {
       bouquet: '/templates',
       order: '/orders',
       stats: '/stats',
+      reconciliation: '/reconciliation',
     };
     navigate(pathMap[page] || '/');
   };
@@ -47,6 +51,7 @@ function AppContent() {
         <Route path="/templates" element={<Templates />} />
         <Route path="/orders" element={<Orders />} />
         <Route path="/stats" element={<Stats />} />
+        <Route path="/reconciliation" element={<Reconciliation />} />
       </Routes>
     </Layout>
   );

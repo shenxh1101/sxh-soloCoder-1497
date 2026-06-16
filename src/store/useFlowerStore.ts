@@ -77,6 +77,10 @@ interface FlowerStore {
 
   getSalePurchases: () => Purchase[];
 
+  getExpiredSalePurchases: () => Purchase[];
+
+  isPurchaseSaleActive: (purchase: Purchase) => boolean;
+
   getLowStockFlowers: () => Flower[];
 
   getExpiringPurchases: (daysThreshold?: number) => (Purchase & {
@@ -284,6 +288,29 @@ export const useFlowerStore = create<FlowerStore>()(
         });
       },
 
+      getExpiredSalePurchases: () => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        return get().purchases.filter((p) => {
+          if (!p.isOnSale || p.remainingStems <= 0) return false;
+          if (!p.saleEndDate) return false;
+          const endDate = new Date(p.saleEndDate);
+          endDate.setHours(0, 0, 0, 0);
+          return endDate < today;
+        });
+      },
+
+      isPurchaseSaleActive: (purchase) => {
+        if (!purchase.isOnSale || purchase.remainingStems <= 0) return false;
+        if (!purchase.saleEndDate) return true;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const endDate = new Date(purchase.saleEndDate);
+        endDate.setHours(0, 0, 0, 0);
+        return endDate >= today;
+      },
+
       createOrder: (data) => {
         const template = get().templates.find((t) => t.id === data.templateId);
         if (!template) {
@@ -383,23 +410,23 @@ export const useFlowerStore = create<FlowerStore>()(
           });
         }
 
+        const templateTotal = template.price * data.quantity;
+
         const orderItem: OrderItem = {
           templateId: template.id,
           templateName: template.name,
           quantity: data.quantity,
-          subtotal: template.price * data.quantity,
+          subtotal: templateTotal,
           flowerUsage: flowerUsageDetailed,
           batchDeductions: allBatchDeductions,
         };
-
-        const totalAmount = Math.round((saleAmount + normalAmount) * 100) / 100;
 
         const newOrder: Order = {
           id: generateId('ord'),
           customerName: data.customerName,
           customerPhone: data.customerPhone,
           orderDate: new Date().toISOString().split('T')[0],
-          totalAmount,
+          totalAmount: Math.round(templateTotal * 100) / 100,
           items: [orderItem],
           status: 'completed',
           saleAmount: Math.round(saleAmount * 100) / 100,

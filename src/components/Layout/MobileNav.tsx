@@ -1,4 +1,4 @@
-import { LayoutDashboard, Package, Flower2, ShoppingCart, BarChart3 } from 'lucide-react'
+import { LayoutDashboard, Package, Flower2, ShoppingCart, ClipboardList, BarChart3 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
 interface MobileNavProps {
@@ -11,6 +11,7 @@ const navItems = [
   { id: 'purchase', label: '进货', icon: Package },
   { id: 'bouquet', label: '模板', icon: Flower2 },
   { id: 'order', label: '订单', icon: ShoppingCart },
+  { id: 'reconciliation', label: '对账', icon: ClipboardList },
   { id: 'stats', label: '统计', icon: BarChart3 },
 ]
 

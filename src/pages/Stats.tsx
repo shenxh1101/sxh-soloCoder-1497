@@ -24,7 +24,7 @@ const isInMonth = (dateStr: string, monthStr: string): boolean => {
 };
 
 export default function Stats() {
-  const { orders, wastages } = useFlowerStore();
+  const { orders, wastages, purchases, getSalePurchases, getExpiredSalePurchases, isPurchaseSaleActive } = useFlowerStore();
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
 
   const monthOrders = useMemo(() => {
@@ -136,6 +136,57 @@ export default function Stats() {
   const totalWastageCost = useMemo(() => {
     return monthWastages.reduce((sum, w) => sum + w.cost, 0);
   }, [monthWastages]);
+
+  const saleReasonStats = useMemo(() => {
+    const reasonMap = new Map<string, { quantity: number; amount: number }>();
+
+    for (const order of monthOrders) {
+      for (const item of order.items) {
+        const deductionsList = item.batchDeductions ?? [];
+        for (const deduction of deductionsList) {
+          if (!deduction.isOnSale) continue;
+          const purchase = purchases.find((p) => p.id === deduction.purchaseId);
+          const reason = purchase?.saleReason?.trim() || '未填写';
+          const existing = reasonMap.get(reason);
+          if (existing) {
+            existing.quantity += deduction.quantity;
+            existing.amount += deduction.unitPrice * deduction.quantity;
+          } else {
+            reasonMap.set(reason, {
+              quantity: deduction.quantity,
+              amount: deduction.unitPrice * deduction.quantity,
+            });
+          }
+        }
+      }
+    }
+
+    return Array.from(reasonMap.entries())
+      .map(([reason, stats]) => ({
+        reason,
+        quantity: stats.quantity,
+        amount: stats.amount,
+      }))
+      .sort((a, b) => b.quantity - a.quantity);
+  }, [monthOrders, purchases]);
+
+  const slowSaleBatches = useMemo(() => {
+    const allSalePurchases = [...getSalePurchases(), ...getExpiredSalePurchases()];
+
+    return allSalePurchases
+      .map((purchase) => {
+        const sold = purchase.quantity - purchase.remainingStems;
+        const remainingRate = purchase.remainingStems / purchase.quantity;
+        return {
+          ...purchase,
+          sold,
+          remainingRate,
+          saleActive: isPurchaseSaleActive(purchase),
+        };
+      })
+      .filter((p) => p.remainingStems > 0 && p.remainingRate >= 0.5)
+      .sort((a, b) => b.remainingRate - a.remainingRate);
+  }, [purchases, getSalePurchases, getExpiredSalePurchases, isPurchaseSaleActive]);
 
   const formatMonthCN = (monthStr: string): string => {
     const [year, month] = monthStr.split('-');
@@ -413,6 +464,176 @@ export default function Stats() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-card border border-orange-100/50 p-5">
+        <h2 className="text-lg font-semibold text-stone-800 font-serif mb-4 flex items-center gap-2">
+          <span>📂</span>
+          特价原因分析
+        </h2>
+        {saleReasonStats.length === 0 ? (
+          <div className="text-center py-12 text-stone-400">
+            <p className="text-4xl mb-2">📋</p>
+            <p>暂无按原因分类的特价数据</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={saleReasonStats} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                  <XAxis
+                    dataKey="reason"
+                    axisLine={{ stroke: '#F2D8D0' }}
+                    tickLine={false}
+                    tick={{ fill: '#78716c', fontSize: 12 }}
+                  />
+                  <YAxis
+                    yAxisId="left"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fill: '#78716c', fontSize: 12 }}
+                  />
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fill: '#78716c', fontSize: 12 }}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#fff',
+                      border: '1px solid #F2D8D0',
+                      borderRadius: '12px',
+                      boxShadow: '0 4px 12px rgba(212, 165, 165, 0.15)',
+                    }}
+                    formatter={(value: number, name: string) => {
+                      if (name === 'quantity') return [`${value} 支`, '卖出数量'];
+                      if (name === 'amount') return [`¥${value.toFixed(2)}`, '收入'];
+                      return [value, name];
+                    }}
+                  />
+                  <Legend
+                    wrapperStyle={{ paddingTop: '10px' }}
+                    formatter={(value: string) => {
+                      if (value === 'quantity') return '卖出数量';
+                      if (value === 'amount') return '收入';
+                      return value;
+                    }}
+                  />
+                  <defs>
+                    <linearGradient id="orangeGradient3" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#F59E0B" />
+                      <stop offset="100%" stopColor="#FBBF24" />
+                    </linearGradient>
+                    <linearGradient id="sageGradient3" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#9CAF88" />
+                      <stop offset="100%" stopColor="#B5C4A3" />
+                    </linearGradient>
+                  </defs>
+                  <Bar
+                    yAxisId="left"
+                    dataKey="quantity"
+                    fill="url(#orangeGradient3)"
+                    radius={[8, 8, 0, 0]}
+                    animationDuration={800}
+                    animationBegin={0}
+                  />
+                  <Bar
+                    yAxisId="right"
+                    dataKey="amount"
+                    fill="url(#sageGradient3)"
+                    radius={[8, 8, 0, 0]}
+                    animationDuration={800}
+                    animationBegin={0}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {saleReasonStats.map((stat) => (
+                <div
+                  key={stat.reason}
+                  className="bg-gradient-to-br from-orange-50 to-rose-50 rounded-xl p-4 border border-orange-100/50"
+                >
+                  <p className="text-sm font-medium text-stone-700 mb-2">{stat.reason}</p>
+                  <div className="flex justify-between items-end">
+                    <div>
+                      <p className="text-xs text-stone-500">卖出数量</p>
+                      <p className="text-lg font-bold text-orange-500 font-serif">{stat.quantity} 支</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-stone-500">收入</p>
+                      <p className="text-lg font-bold text-sage-500 font-serif">¥{stat.amount.toFixed(2)}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-card border border-rose-100/50 p-5">
+        <h2 className="text-lg font-semibold text-stone-800 font-serif mb-4 flex items-center gap-2">
+          <span>⚠️</span>
+          特价滞销批次
+        </h2>
+        {slowSaleBatches.length === 0 ? (
+          <div className="text-center py-12 text-stone-400">
+            <p className="text-4xl mb-2">🌱</p>
+            <p>暂无滞销的特价批次</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {slowSaleBatches.map((batch) => (
+              <div
+                key={batch.id}
+                className="bg-gradient-to-br from-rose-50 to-orange-50 rounded-xl p-4 border border-rose-100/50"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg">🌸</span>
+                    <span className="font-medium text-stone-700">{batch.flowerName}</span>
+                  </div>
+                  <span
+                    className={`text-xs px-2 py-1 rounded-full font-medium ${
+                      batch.saleActive
+                        ? 'bg-orange-100 text-orange-600'
+                        : 'bg-stone-100 text-stone-500'
+                    }`}
+                  >
+                    {batch.saleActive ? '进行中' : '已结束'}
+                  </span>
+                </div>
+                <div className="mb-3">
+                  <div className="flex justify-between text-sm text-stone-600 mb-1">
+                    <span>剩余 {batch.remainingStems}/{batch.quantity} 支</span>
+                    <span className="font-medium text-rose-400">
+                      {(batch.remainingRate * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-rose-100 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-gradient-to-r from-rose-400 to-orange-400"
+                      style={{ width: `${batch.remainingRate * 100}%` }}
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <div>
+                    <p className="text-xs text-stone-500">特价价格</p>
+                    <p className="font-bold text-orange-500 font-serif">¥{batch.salePrice?.toFixed(2)}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-stone-500">特价原因</p>
+                    <p className="text-stone-700">{batch.saleReason || '未填写'}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
