@@ -86,6 +86,15 @@ export default function Dashboard() {
     return Math.round((1 - salePrice / originalPrice) * 100);
   };
 
+  const getFlowerSaleInfo = (flowerId: string) => {
+    return purchases.find(
+      (p) =>
+        p.flowerId === flowerId &&
+        p.salePrice !== null &&
+        isPurchaseSaleActive(p)
+    );
+  };
+
   const handleOpenPurchaseModal = () => {
     setIsPurchaseModalOpen(true);
     setSelectedFlower('');
@@ -1008,6 +1017,7 @@ export default function Dashboard() {
                   {stockCheck.flowerUsage.map((usage, index) => {
                     const isSufficient = usage.available >= usage.required;
                     const flower = flowers.find((f) => f.id === usage.flowerId);
+                    const saleInfo = getFlowerSaleInfo(usage.flowerId);
                     return (
                       <div
                         key={index}
@@ -1018,7 +1028,14 @@ export default function Dashboard() {
                       >
                         <div className="flex items-center gap-2">
                           <span className="text-xl">{flower?.emoji || '🌸'}</span>
-                          <span className="text-sm text-stone-700">{usage.flowerName}</span>
+                          <div>
+                            <span className="text-sm text-stone-700">{usage.flowerName}</span>
+                            {saleInfo && saleInfo.salePrice !== null && (
+                              <span className="ml-2 px-2 py-0.5 bg-orange-100 text-orange-600 text-xs rounded-full font-medium">
+                                有特价¥{saleInfo.salePrice.toFixed(1)}/支
+                              </span>
+                            )}
+                          </div>
                         </div>
                         <div className="text-right">
                           <p

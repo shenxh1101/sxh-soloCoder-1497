@@ -39,6 +39,7 @@ export default function Reconciliation() {
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+  const [searchKeyword, setSearchKeyword] = useState('');
 
   const filteredOrders = useMemo(() => {
     let result = orders.filter((o) => isInMonth(o.orderDate, selectedMonth));
@@ -49,24 +50,38 @@ export default function Reconciliation() {
       result = result.filter((o) => o.status === 'cancelled');
     }
 
+    if (searchKeyword.trim()) {
+      const keyword = searchKeyword.toLowerCase().trim();
+      result = result.filter((order) => {
+        if (order.customerName.toLowerCase().includes(keyword)) return true;
+        if (order.customerPhone.includes(keyword)) return true;
+        for (const item of order.items) {
+          if (item.templateName.toLowerCase().includes(keyword)) return true;
+          for (const deduction of item.batchDeductions ?? []) {
+            if (deduction.purchaseId.toLowerCase().includes(keyword)) return true;
+          }
+        }
+        return false;
+      });
+    }
+
     return result.sort(
       (a, b) => new Date(b.orderDate).getTime() - new Date(a.orderDate).getTime()
     );
-  }, [orders, selectedMonth, statusFilter]);
+  }, [orders, selectedMonth, statusFilter, searchKeyword]);
 
   const stats = useMemo(() => {
-    const monthOrders = orders.filter((o) => isInMonth(o.orderDate, selectedMonth));
-    const totalOrders = monthOrders.length;
-    const totalReceivable = monthOrders.reduce((sum, o) => sum + o.totalAmount, 0);
-    const completedAmount = monthOrders
+    const totalOrders = filteredOrders.length;
+    const totalReceivable = filteredOrders.reduce((sum, o) => sum + o.totalAmount, 0);
+    const completedAmount = filteredOrders
       .filter((o) => o.status === 'completed')
       .reduce((sum, o) => sum + o.totalAmount, 0);
-    const cancelledAmount = monthOrders
+    const cancelledAmount = filteredOrders
       .filter((o) => o.status === 'cancelled')
       .reduce((sum, o) => sum + o.totalAmount, 0);
 
-    const totalSaleAmount = monthOrders.reduce((sum, o) => sum + (o.saleAmount || 0), 0);
-    const totalNormalAmount = monthOrders.reduce((sum, o) => sum + (o.normalAmount || 0), 0);
+    const totalSaleAmount = filteredOrders.reduce((sum, o) => sum + (o.saleAmount || 0), 0);
+    const totalNormalAmount = filteredOrders.reduce((sum, o) => sum + (o.normalAmount || 0), 0);
     const saleRatio = calcSaleRatio(totalSaleAmount, totalNormalAmount);
 
     return {
@@ -76,7 +91,7 @@ export default function Reconciliation() {
       cancelledAmount,
       saleRatio,
     };
-  }, [orders, selectedMonth]);
+  }, [filteredOrders]);
 
   const getPurchaseById = (purchaseId: string) => {
     return purchases.find((p) => p.id === purchaseId);
@@ -91,6 +106,86 @@ export default function Reconciliation() {
     };
   };
 
+  const handleExport = () => {
+    const statusLabel = {
+      all: '全部',
+      completed: '已完成',
+      cancelled: '已撤销',
+    };
+    const fileName = `花店对账_${selectedMonth}_${statusLabel[statusFilter]}.csv`;
+
+    const headers = [
+      '日期',
+      '客户姓名',
+      '联系电话',
+      '花束模板',
+      '数量',
+      '应收金额',
+      '订单状态',
+      '批次ID列表',
+      '花材用量',
+      '特价占比(%)',
+      '备注',
+    ];
+
+    const rows = filteredOrders.map((order) => {
+      const templates = order.items.map((item) => item.templateName).join('; ');
+      const quantities = order.items.map((item) => item.quantity).join('; ');
+      const statusText = order.status === 'completed' ? '已完成' : '已撤销';
+      
+      const purchaseIds: string[] = [];
+      const flowerUsageMap = new Map<string, number>();
+      
+      for (const item of order.items) {
+        for (const deduction of item.batchDeductions ?? []) {
+          if (!purchaseIds.includes(deduction.purchaseId)) {
+            purchaseIds.push(deduction.purchaseId);
+          }
+          const current = flowerUsageMap.get(deduction.flowerName) || 0;
+          flowerUsageMap.set(deduction.flowerName, current + deduction.quantity);
+        }
+      }
+      
+      const purchaseIdStr = purchaseIds.join('; ');
+      const flowerUsageStr = Array.from(flowerUsageMap.entries())
+        .map(([name, qty]) => `${name}${qty}支`)
+        .join('; ');
+      
+      const orderSaleRatio = calcSaleRatio(order.saleAmount || 0, order.normalAmount || 0);
+      const saleRatioStr = (orderSaleRatio * 100).toFixed(1);
+      
+      return [
+        formatDateCN(order.orderDate),
+        order.customerName,
+        order.customerPhone,
+        templates,
+        quantities,
+        order.totalAmount.toFixed(2),
+        statusText,
+        purchaseIdStr,
+        flowerUsageStr,
+        saleRatioStr,
+        '',
+      ];
+    });
+
+    const csvContent = [headers, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+
+    const BOM = '\uFEFF';
+    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', fileName);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -98,51 +193,86 @@ export default function Reconciliation() {
           <h1 className="text-2xl font-bold text-stone-800 font-serif">订单对账</h1>
           <p className="text-stone-500 text-sm mt-1">月底核账和订单明细查询</p>
         </div>
+        <button
+          onClick={handleExport}
+          disabled={filteredOrders.length === 0}
+          className={cn(
+            'px-5 py-2.5 rounded-xl font-medium transition-all duration-200',
+            'flex items-center gap-2',
+            filteredOrders.length > 0
+              ? 'bg-gradient-to-r from-rose-400 to-rose-500 text-white hover:from-rose-500 hover:to-rose-600 shadow-md hover:shadow-lg hover:-translate-y-0.5'
+              : 'bg-stone-200 text-stone-400 cursor-not-allowed'
+          )}
+        >
+          <span>📥</span>
+          <span>导出对账表</span>
+        </button>
       </div>
 
       <div className="bg-white rounded-2xl shadow-card border border-rose-100/50 p-5">
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="flex items-center gap-2">
-            <label className="text-sm text-stone-600 whitespace-nowrap">月份：</label>
-            <select
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
-              className="px-4 py-2 rounded-xl border border-rose-200 bg-white text-stone-700 focus:outline-none focus:ring-2 focus:ring-rose-300 focus:border-rose-300 transition-all"
-            >
-              {generateMonthOptions().map((month) => (
-                <option key={month} value={month}>
-                  {formatMonthCN(month)}
-                </option>
-              ))}
-            </select>
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-stone-600 whitespace-nowrap">月份：</label>
+              <select
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                className="px-4 py-2 rounded-xl border border-rose-200 bg-white text-stone-700 focus:outline-none focus:ring-2 focus:ring-rose-300 focus:border-rose-300 transition-all"
+              >
+                {generateMonthOptions().map((month) => (
+                  <option key={month} value={month}>
+                    {formatMonthCN(month)}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-stone-600 whitespace-nowrap">订单状态：</label>
+              <div className="flex gap-1 bg-stone-100 rounded-xl p-1">
+                {(['all', 'completed', 'cancelled'] as StatusFilter[]).map((status) => {
+                  const labels = {
+                    all: '全部',
+                    completed: '已完成',
+                    cancelled: '已撤销',
+                  };
+                  const isActive = statusFilter === status;
+                  return (
+                    <button
+                      key={status}
+                      onClick={() => setStatusFilter(status)}
+                      className={cn(
+                        'px-4 py-1.5 rounded-lg text-sm font-medium transition-all duration-200',
+                        isActive
+                          ? 'bg-white text-rose-500 shadow-sm'
+                          : 'text-stone-500 hover:text-stone-700'
+                      )}
+                    >
+                      {labels[status]}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
-            <label className="text-sm text-stone-600 whitespace-nowrap">订单状态：</label>
-            <div className="flex gap-1 bg-stone-100 rounded-xl p-1">
-              {(['all', 'completed', 'cancelled'] as StatusFilter[]).map((status) => {
-                const labels = {
-                  all: '全部',
-                  completed: '已完成',
-                  cancelled: '已撤销',
-                };
-                const isActive = statusFilter === status;
-                return (
-                  <button
-                    key={status}
-                    onClick={() => setStatusFilter(status)}
-                    className={cn(
-                      'px-4 py-1.5 rounded-lg text-sm font-medium transition-all duration-200',
-                      isActive
-                        ? 'bg-white text-rose-500 shadow-sm'
-                        : 'text-stone-500 hover:text-stone-700'
-                    )}
-                  >
-                    {labels[status]}
-                  </button>
-                );
-              })}
-            </div>
+            <label className="text-sm text-stone-600 whitespace-nowrap">搜索：</label>
+            <input
+              type="text"
+              value={searchKeyword}
+              onChange={(e) => setSearchKeyword(e.target.value)}
+              placeholder="客户姓名、电话、花束模板、批次ID"
+              className="flex-1 px-4 py-2 rounded-xl border border-rose-200 bg-white text-stone-700 focus:outline-none focus:ring-2 focus:ring-rose-300 focus:border-rose-300 transition-all"
+            />
+            {searchKeyword && (
+              <button
+                onClick={() => setSearchKeyword('')}
+                className="px-3 py-2 text-stone-400 hover:text-stone-600 transition-colors"
+              >
+                ✕
+              </button>
+            )}
           </div>
         </div>
       </div>

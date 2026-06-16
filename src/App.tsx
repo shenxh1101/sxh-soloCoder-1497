@@ -6,6 +6,8 @@ import Templates from '@/pages/Templates';
 import Orders from '@/pages/Orders';
 import Stats from '@/pages/Stats';
 import Reconciliation from '@/pages/Reconciliation';
+import BatchProfit from '@/pages/BatchProfit';
+import RestockSuggestion from '@/pages/RestockSuggestion';
 
 const pageMap: Record<string, string> = {
   '/': 'home',
@@ -14,6 +16,8 @@ const pageMap: Record<string, string> = {
   '/orders': 'order',
   '/stats': 'stats',
   '/reconciliation': 'reconciliation',
+  '/batch-profit': 'batchProfit',
+  '/restock': 'restock',
 };
 
 const titleMap: Record<string, string> = {
@@ -23,6 +27,8 @@ const titleMap: Record<string, string> = {
   '/orders': '订单销售',
   '/stats': '月度统计',
   '/reconciliation': '订单对账',
+  '/batch-profit': '批次利润',
+  '/restock': '补货建议',
 };
 
 function AppContent() {
@@ -39,6 +45,8 @@ function AppContent() {
       order: '/orders',
       stats: '/stats',
       reconciliation: '/reconciliation',
+      batchProfit: '/batch-profit',
+      restock: '/restock',
     };
     navigate(pathMap[page] || '/');
   };
@@ -52,6 +60,8 @@ function AppContent() {
         <Route path="/orders" element={<Orders />} />
         <Route path="/stats" element={<Stats />} />
         <Route path="/reconciliation" element={<Reconciliation />} />
+        <Route path="/batch-profit" element={<BatchProfit />} />
+        <Route path="/restock" element={<RestockSuggestion />} />
       </Routes>
     </Layout>
   );

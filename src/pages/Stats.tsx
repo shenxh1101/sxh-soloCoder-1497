@@ -145,8 +145,7 @@ export default function Stats() {
         const deductionsList = item.batchDeductions ?? [];
         for (const deduction of deductionsList) {
           if (!deduction.isOnSale) continue;
-          const purchase = purchases.find((p) => p.id === deduction.purchaseId);
-          const reason = purchase?.saleReason?.trim() || '未填写';
+          const reason = deduction.saleReason?.trim() || '未填写';
           const existing = reasonMap.get(reason);
           if (existing) {
             existing.quantity += deduction.quantity;
@@ -168,7 +167,7 @@ export default function Stats() {
         amount: stats.amount,
       }))
       .sort((a, b) => b.quantity - a.quantity);
-  }, [monthOrders, purchases]);
+  }, [monthOrders]);
 
   const slowSaleBatches = useMemo(() => {
     const allSalePurchases = [...getSalePurchases(), ...getExpiredSalePurchases()];

@@ -397,6 +397,7 @@ export const useFlowerStore = create<FlowerStore>()(
               quantity: deduct,
               unitPrice: Math.round(unitPrice * 100) / 100,
               isOnSale,
+              saleReason: isOnSale ? (purchase.saleReason || '') : '',
             });
 
             purchase.remainingStems -= deduct;
@@ -560,11 +561,11 @@ export const useFlowerStore = create<FlowerStore>()(
     }),
     {
       name: 'flower-shop-storage',
-      version: 2,
+      version: 3,
       migrate: (state: any, version: number) => {
+        let migrated = { ...state };
+        
         if (version < 2) {
-          const migrated = { ...state };
-          
           migrated.purchases = (migrated.purchases || []).map((p: any) => ({
             ...p,
             isOnSale: p.isOnSale ?? false,
@@ -587,10 +588,22 @@ export const useFlowerStore = create<FlowerStore>()(
             ...w,
             purchaseId: w.purchaseId ?? '',
           }));
-          
-          return migrated;
         }
-        return state;
+        
+        if (version < 3) {
+          migrated.orders = (migrated.orders || []).map((o: any) => ({
+            ...o,
+            items: (o.items || []).map((item: any) => ({
+              ...item,
+              batchDeductions: (item.batchDeductions || []).map((d: any) => ({
+                ...d,
+                saleReason: d.saleReason ?? '',
+              })),
+            })),
+          }));
+        }
+        
+        return migrated;
       },
     }
   )

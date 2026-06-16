@@ -43,6 +43,7 @@ export interface BatchDeduction {
   quantity: number;
   unitPrice: number;
   isOnSale: boolean;
+  saleReason: string;
 }
 
 export interface OrderItem {
